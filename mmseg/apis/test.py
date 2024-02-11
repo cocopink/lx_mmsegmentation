@@ -89,6 +89,9 @@ def single_gpu_test(model,
     for batch_indices, data in zip(loader_indices, data_loader):
         with torch.no_grad():
             result = model(return_loss=False, **data)
+            # print(len(result))
+            # print(result[0].shape)
+            #print(result.size)
 
         if show or out_dir:
             img_tensor = data['img'][0]
@@ -101,6 +104,8 @@ def single_gpu_test(model,
                 img_show = img[:h, :w, :]
 
                 ori_h, ori_w = img_meta['ori_shape'][:-1]
+                # print(img_show.shape)
+                # exit(0)
                 img_show = mmcv.imresize(img_show, (ori_w, ori_h))
 
                 if out_dir:
@@ -115,6 +120,14 @@ def single_gpu_test(model,
                     show=show,
                     out_file=out_file,
                     opacity=opacity)
+                # seg_map = result[0].cpu().numpy().astype(np.uint8)
+                # seg_map = dataset.reduce_label(seg_map)
+                # seg_map = mmcv.imresize(
+                # seg_map, (ori_w, ori_h), interpolation='nearest')
+
+                # # 保存掩码图像
+                # out_file = osp.join(out_dir, img_meta['ori_filename'])
+                # mmcv.imwrite(seg_map, out_file)
 
         if efficient_test:
             result = [np2tmp(_, tmpdir='.efficient_test') for _ in result]

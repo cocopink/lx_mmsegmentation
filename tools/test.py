@@ -260,7 +260,8 @@ def main():
         tmpdir = None
 
     cfg.device = get_device()
-    if not distributed:
+    #if not distributed:
+    if(1):
         warnings.warn(
             'SyncBN is only supported with DDP. To be compatible with DP, '
             'we convert SyncBN to BN. Please use dist_train.sh which can '
@@ -270,6 +271,7 @@ def main():
                 'Please use MMCV >= 1.4.4 for CPU training!'
         model = revert_sync_batchnorm(model)
         model = build_dp(model, cfg.device, device_ids=cfg.gpu_ids)
+        #print('*****************************')
         results = single_gpu_test(
             model,
             data_loader,
@@ -281,11 +283,13 @@ def main():
             format_only=args.format_only or eval_on_format_results,
             format_args=eval_kwargs)
     else:
+        #print('*111111111111111111111*')
         model = build_ddp(
             model,
             cfg.device,
             device_ids=[int(os.environ['LOCAL_RANK'])],
             broadcast_buffers=False)
+        #print('*111111111111111111111*')对的
         results = multi_gpu_test(
             model,
             data_loader,
@@ -295,6 +299,7 @@ def main():
             pre_eval=args.eval is not None and not eval_on_format_results,
             format_only=args.format_only or eval_on_format_results,
             format_args=eval_kwargs)
+        print('*2222222222222222222222222*')
 
     rank, _ = get_dist_info()
     if rank == 0:

@@ -1,8 +1,8 @@
-CONFIG=$1
-GPUS=$2
+CONFIG='/home/lmf/mmsegmentation/work_configs/tamper/tamper_convx_b_exp.py'
+GPUS=4
 NNODES=${NNODES:-1}
 NODE_RANK=${NODE_RANK:-0}
-PORT=${PORT:-29500}
+PORT=${PORT:-29503}
 MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 
 PYTHONPATH="$(dirname $0)/..":$PYTHONPATH \

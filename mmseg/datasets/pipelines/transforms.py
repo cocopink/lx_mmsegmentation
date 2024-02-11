@@ -1,10 +1,29 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import copy
+import os
+import inspect
+from collections import defaultdict
 
+import cv2
 import mmcv
 import numpy as np
+from copy import deepcopy
 from mmcv.utils import deprecated_api_warning, is_tuple_of
 from numpy import random
+
+import traceback
+
+try:
+    from imagecorruptions import corrupt
+except ImportError:
+    corrupt = None
+
+try:
+    import albumentations
+    from albumentations import Compose
+except ImportError:
+    albumentations = None
+    Compose = None
 
 from ..builder import PIPELINES
 
@@ -99,19 +118,13 @@ class Resize(object):
             Default: None
         keep_ratio (bool): Whether to keep the aspect ratio when resizing the
             image. Default: True
-        min_size (int, optional): The minimum size for input and the shape
-            of the image and seg map will not be less than ``min_size``.
-            As the shape of model input is fixed like 'SETR' and 'BEiT'.
-            Following the setting in these models, resized images must be
-            bigger than the crop size in ``slide_inference``. Default: None
     """
 
     def __init__(self,
                  img_scale=None,
                  multiscale_mode='range',
                  ratio_range=None,
-                 keep_ratio=True,
-                 min_size=None):
+                 keep_ratio=True):
         if img_scale is None:
             self.img_scale = None
         else:
@@ -132,7 +145,6 @@ class Resize(object):
         self.multiscale_mode = multiscale_mode
         self.ratio_range = ratio_range
         self.keep_ratio = keep_ratio
-        self.min_size = min_size
 
     @staticmethod
     def random_select(img_scales):
@@ -247,23 +259,6 @@ class Resize(object):
     def _resize_img(self, results):
         """Resize images with ``results['scale']``."""
         if self.keep_ratio:
-            if self.min_size is not None:
-                # TODO: Now 'min_size' is an 'int' which means the minimum
-                # shape of images is (min_size, min_size, 3). 'min_size'
-                # with tuple type will be supported, i.e. the width and
-                # height are not equal.
-                if min(results['scale']) < self.min_size:
-                    new_short = self.min_size
-                else:
-                    new_short = min(results['scale'])
-
-                h, w = results['img'].shape[:2]
-                if h > w:
-                    new_h, new_w = new_short * h / w, new_short
-                else:
-                    new_h, new_w = new_short, new_short * w / h
-                results['scale'] = (new_h, new_w)
-
             img, scale_factor = mmcv.imrescale(
                 results['img'], results['scale'], return_scale=True)
             # the w_scale and h_scale has minor difference
@@ -460,9 +455,10 @@ class Normalize(object):
             default is true.
     """
 
-    def __init__(self, mean, std, to_rgb=True):
+    def __init__(self, mean, std, multiply = 1, to_rgb=True):
         self.mean = np.array(mean, dtype=np.float32)
         self.std = np.array(std, dtype=np.float32)
+        self.multiply = multiply
         self.to_rgb = to_rgb
 
     def __call__(self, results):
@@ -476,7 +472,7 @@ class Normalize(object):
                 result dict.
         """
 
-        results['img'] = mmcv.imnormalize(results['img'], self.mean, self.std,
+        results['img'] = mmcv.imnormalize(results['img'] * self.multiply, self.mean, self.std,
                                           self.to_rgb)
         results['img_norm_cfg'] = dict(
             mean=self.mean, std=self.std, to_rgb=self.to_rgb)
@@ -737,6 +733,82 @@ class RandomRotate(object):
 
 
 @PIPELINES.register_module()
+class RandomRotate90(object):
+    """Rotate the image & seg.
+
+    Args:
+        prob (float): The rotation probability.
+        degree (float, tuple[float]): Range of degrees to select from. If
+            degree is a number instead of tuple like (min, max),
+            the range of degree will be (``-degree``, ``+degree``)
+        pad_val (float, optional): Padding value of image. Default: 0.
+        seg_pad_val (float, optional): Padding value of segmentation map.
+            Default: 255.
+        center (tuple[float], optional): Center point (w, h) of the rotation in
+            the source image. If not specified, the center of the image will be
+            used. Default: None.
+        auto_bound (bool): Whether to adjust the image size to cover the whole
+            rotated image. Default: False
+    """
+
+    def __init__(self,
+                 prob,
+                 pad_val=0,
+                 seg_pad_val=255,
+                 center=None,
+                 auto_bound=False):
+        self.prob = prob
+        assert prob >= 0 and prob <= 1
+        self.pal_val = pad_val
+        self.seg_pad_val = seg_pad_val
+        self.center = center
+        self.auto_bound = auto_bound
+
+    def __call__(self, results):
+        """Call function to rotate image, semantic segmentation maps.
+
+        Args:
+            results (dict): Result dict from loading pipeline.
+
+        Returns:
+            dict: Rotated results.
+        """
+
+        rotate = True if np.random.rand() < self.prob else False
+        degree = np.random.choice([90, -90], p = [0.5, 0.5])
+        if rotate:
+            # rotate image
+            results['img'] = mmcv.imrotate(
+                results['img'],
+                angle=degree,
+                border_value=self.pal_val,
+                center=self.center,
+                auto_bound=self.auto_bound)
+
+            # rotate segs
+            for key in results.get('seg_fields', []):
+                results[key] = mmcv.imrotate(
+                    results[key],
+                    angle=degree,
+                    border_value=self.seg_pad_val,
+                    center=self.center,
+                    auto_bound=self.auto_bound,
+                    interpolation='nearest')
+        return results
+
+    def __repr__(self):
+        repr_str = self.__class__.__name__
+        repr_str += f'(prob={self.prob}, ' \
+                    f'degree={self.degree}, ' \
+                    f'pad_val={self.pal_val}, ' \
+                    f'seg_pad_val={self.seg_pad_val}, ' \
+                    f'center={self.center}, ' \
+                    f'auto_bound={self.auto_bound})'
+        return repr_str
+
+
+
+@PIPELINES.register_module()
 class RGB2Gray(object):
     """Convert RGB image to grayscale image.
 
@@ -914,22 +986,22 @@ class PhotoMetricDistortion(object):
     def saturation(self, img):
         """Saturation distortion."""
         if random.randint(2):
-            img = mmcv.bgr2hsv(img)
-            img[:, :, 1] = self.convert(
-                img[:, :, 1],
+            img2 = mmcv.bgr2hsv(img[...,:3])
+            img2[:, :, 1] = self.convert(
+                img2[:, :, 1],
                 alpha=random.uniform(self.saturation_lower,
                                      self.saturation_upper))
-            img = mmcv.hsv2bgr(img)
+            img[...,:3] = mmcv.hsv2bgr(img2)
         return img
 
     def hue(self, img):
         """Hue distortion."""
         if random.randint(2):
-            img = mmcv.bgr2hsv(img)
-            img[:, :,
-                0] = (img[:, :, 0].astype(int) +
+            img2 = mmcv.bgr2hsv(img[...,:3])
+            img2[:, :,
+                0] = (img2[:, :, 0].astype(int) +
                       random.randint(-self.hue_delta, self.hue_delta)) % 180
-            img = mmcv.hsv2bgr(img)
+            img[...,:3] = mmcv.hsv2bgr(img2)
         return img
 
     def __call__(self, results):
@@ -977,359 +1049,224 @@ class PhotoMetricDistortion(object):
 
 
 @PIPELINES.register_module()
-class RandomCutOut(object):
-    """CutOut operation.
+class Albu:
+    """Albumentation augmentation.
 
-    Randomly drop some regions of image used in
-    `Cutout <https://arxiv.org/abs/1708.04552>`_.
+    Adds custom transformations from Albumentations library.
+    Please, visit `https://albumentations.readthedocs.io`
+    to get more information.
+
+    An example of ``transforms`` is as followed:
+
+    .. code-block::
+
+        [
+            dict(
+                type='ShiftScaleRotate',
+                shift_limit=0.0625,
+                scale_limit=0.0,
+                rotate_limit=0,
+                interpolation=1,
+                p=0.5),
+            dict(
+                type='RandomBrightnessContrast',
+                brightness_limit=[0.1, 0.3],
+                contrast_limit=[0.1, 0.3],
+                p=0.2),
+            dict(type='ChannelShuffle', p=0.1),
+            dict(
+                type='OneOf',
+                transforms=[
+                    dict(type='Blur', blur_limit=3, p=1.0),
+                    dict(type='MedianBlur', blur_limit=3, p=1.0)
+                ],
+                p=0.1),
+        ]
+
     Args:
-        prob (float): cutout probability.
-        n_holes (int | tuple[int, int]): Number of regions to be dropped.
-            If it is given as a list, number of holes will be randomly
-            selected from the closed interval [`n_holes[0]`, `n_holes[1]`].
-        cutout_shape (tuple[int, int] | list[tuple[int, int]]): The candidate
-            shape of dropped regions. It can be `tuple[int, int]` to use a
-            fixed cutout shape, or `list[tuple[int, int]]` to randomly choose
-            shape from the list.
-        cutout_ratio (tuple[float, float] | list[tuple[float, float]]): The
-            candidate ratio of dropped regions. It can be `tuple[float, float]`
-            to use a fixed ratio or `list[tuple[float, float]]` to randomly
-            choose ratio from the list. Please note that `cutout_shape`
-            and `cutout_ratio` cannot be both given at the same time.
-        fill_in (tuple[float, float, float] | tuple[int, int, int]): The value
-            of pixel to fill in the dropped regions. Default: (0, 0, 0).
-        seg_fill_in (int): The labels of pixel to fill in the dropped regions.
-            If seg_fill_in is None, skip. Default: None.
+        transforms (list[dict]): A list of albu transformations
+        bbox_params (dict): Bbox_params for albumentation `Compose`
+        keymap (dict): Contains {'input key':'albumentation-style key'}
+        skip_img_without_anno (bool): Whether to skip the image if no ann left
+            after aug
     """
 
     def __init__(self,
-                 prob,
-                 n_holes,
-                 cutout_shape=None,
-                 cutout_ratio=None,
-                 fill_in=(0, 0, 0),
-                 seg_fill_in=None):
+                 transforms,
+                 bbox_params=None,
+                 keymap=None,
+                #  update_pad_shape=False,
+                 skip_img_without_anno=False):
+        if Compose is None:
+            raise RuntimeError('albumentations is not installed')
 
-        assert 0 <= prob and prob <= 1
-        assert (cutout_shape is None) ^ (cutout_ratio is None), \
-            'Either cutout_shape or cutout_ratio should be specified.'
-        assert (isinstance(cutout_shape, (list, tuple))
-                or isinstance(cutout_ratio, (list, tuple)))
-        if isinstance(n_holes, tuple):
-            assert len(n_holes) == 2 and 0 <= n_holes[0] < n_holes[1]
+        # Args will be modified later, copying it will be safer
+        transforms = copy.deepcopy(transforms)
+        # if bbox_params is not None:
+        #     bbox_params = copy.deepcopy(bbox_params)
+        # if keymap is not None:
+        #     keymap = copy.deepcopy(keymap)
+        self.transforms = transforms
+        # self.filter_lost_elements = False
+        # self.update_pad_shape = update_pad_shape
+        # self.skip_img_without_anno = skip_img_without_anno
+
+        # A simple workaround to remove masks without boxes
+        # if (isinstance(bbox_params, dict) and 'label_fields' in bbox_params
+        #         and 'filter_lost_elements' in bbox_params):
+        #     self.filter_lost_elements = True
+        #     self.origin_label_fields = bbox_params['label_fields']
+        #     bbox_params['label_fields'] = ['idx_mapper']
+        #     del bbox_params['filter_lost_elements']
+
+        # self.bbox_params = (
+            # self.albu_builder(bbox_params) if bbox_params else None)
+        self.aug = Compose([self.albu_builder(t) for t in self.transforms],)
+                        #    bbox_params=self.bbox_params)
+
+        # if not keymap:
+        #     self.keymap_to_albu = {
+        #         'img': 'image',
+        #         'gt_masks': 'masks',
+        #         'gt_bboxes': 'bboxes'
+        #     }
+        # else:
+        #     self.keymap_to_albu = keymap
+        # self.keymap_back = {v: k for k, v in self.keymap_to_albu.items()}
+
+    def albu_builder(self, cfg):
+        """Import a module from albumentations.
+
+        It inherits some of :func:`build_from_cfg` logic.
+
+        Args:
+            cfg (dict): Config dict. It should at least contain the key "type".
+
+        Returns:
+            obj: The constructed object.
+        """
+
+        assert isinstance(cfg, dict) and 'type' in cfg
+        args = cfg.copy()
+
+        obj_type = args.pop('type')
+        if mmcv.is_str(obj_type):
+            if albumentations is None:
+                raise RuntimeError('albumentations is not installed')
+            obj_cls = getattr(albumentations, obj_type)
+        elif inspect.isclass(obj_type):
+            obj_cls = obj_type
         else:
-            n_holes = (n_holes, n_holes)
-        if seg_fill_in is not None:
-            assert (isinstance(seg_fill_in, int) and 0 <= seg_fill_in
-                    and seg_fill_in <= 255)
-        self.prob = prob
-        self.n_holes = n_holes
-        self.fill_in = fill_in
-        self.seg_fill_in = seg_fill_in
-        self.with_ratio = cutout_ratio is not None
-        self.candidates = cutout_ratio if self.with_ratio else cutout_shape
-        if not isinstance(self.candidates, list):
-            self.candidates = [self.candidates]
+            raise TypeError(
+                f'type must be a str or valid type, but got {type(obj_type)}')
+
+        if 'transforms' in args:
+            args['transforms'] = [
+                self.albu_builder(transform)
+                for transform in args['transforms']
+            ]
+
+        return obj_cls(**args)
+
+    @staticmethod
+    def mapper(d, keymap):
+        """Dictionary mapper. Renames keys according to keymap provided.
+
+        Args:
+            d (dict): old dict
+            keymap (dict): {'old_key':'new_key'}
+        Returns:
+            dict: new dict.
+        """
+
+        updated_dict = {}
+        for k, v in zip(d.keys(), d.values()):
+            new_k = keymap.get(k, k)
+            updated_dict[new_k] = d[k]
+        return updated_dict
 
     def __call__(self, results):
-        """Call function to drop some regions of image."""
-        cutout = True if np.random.rand() < self.prob else False
-        if cutout:
-            h, w, c = results['img'].shape
-            n_holes = np.random.randint(self.n_holes[0], self.n_holes[1] + 1)
-            for _ in range(n_holes):
-                x1 = np.random.randint(0, w)
-                y1 = np.random.randint(0, h)
-                index = np.random.randint(0, len(self.candidates))
-                if not self.with_ratio:
-                    cutout_w, cutout_h = self.candidates[index]
-                else:
-                    cutout_w = int(self.candidates[index][0] * w)
-                    cutout_h = int(self.candidates[index][1] * h)
+        # dict to albumentations format
+        res = deepcopy(results)
+        try:
+            # results = self.mapper(results, self.keymap_to_albu)
+            # TODO: add bbox_fields
+            # if 'bboxes' in results:
+            #     # to list of boxes
+            #     if isinstance(results['bboxes'], np.ndarray):
+            #         results['bboxes'] = [x for x in results['bboxes']]
+            #     # add pseudo-field for filtration
+            #     if self.filter_lost_elements:
+            #         results['idx_mapper'] = np.arange(len(results['bboxes']))
 
-                x2 = np.clip(x1 + cutout_w, 0, w)
-                y2 = np.clip(y1 + cutout_h, 0, h)
-                results['img'][y1:y2, x1:x2, :] = self.fill_in
+            # # TODO: Support mask structure in albu
+            # if 'masks' in results:
+            #     if isinstance(results['masks'], PolygonMasks):
+            #         raise NotImplementedError(
+            #             'Albu only supports BitMap masks now')
+            #     ori_masks = results['masks']
+            #     if albumentations.__version__ < '0.5':
+            #         results['masks'] = results['masks'].masks
+            #     else:
+            #         results['masks'] = [mask for mask in results['masks'].masks]
+            seg_keys = results.get('seg_fields', [])
+            masks = []
+            for key in seg_keys:
+                masks.append(results[key])
+            # for key in results.get('seg_fields', []):
+            #     results[key] = mmcv.imrotate(
+            #         results[key],
+            #         angle=degree,
+            #         border_value=self.seg_pad_val,
+            #         center=self.center,
+            #         auto_bound=self.auto_bound,
+            #         interpolation='nearest')
 
-                if self.seg_fill_in is not None:
-                    for key in results.get('seg_fields', []):
-                        results[key][y1:y2, x1:x2] = self.seg_fill_in
+            augged = self.aug(image = results['img'], masks = masks)
+            results['img'] = augged['image']
+            for i, key in enumerate(seg_keys):
+                results[key] = augged['masks'][i]
 
-        return results
+            # if 'bboxes' in results:
+            #     if isinstance(results['bboxes'], list):
+            #         results['bboxes'] = np.array(
+            #             results['bboxes'], dtype=np.float32)
+            #     results['bboxes'] = results['bboxes'].reshape(-1, 4)
 
-    def __repr__(self):
-        repr_str = self.__class__.__name__
-        repr_str += f'(prob={self.prob}, '
-        repr_str += f'n_holes={self.n_holes}, '
-        repr_str += (f'cutout_ratio={self.candidates}, ' if self.with_ratio
-                     else f'cutout_shape={self.candidates}, ')
-        repr_str += f'fill_in={self.fill_in}, '
-        repr_str += f'seg_fill_in={self.seg_fill_in})'
-        return repr_str
+            #     # filter label_fields
+            #     if self.filter_lost_elements:
 
+            #         for label in self.origin_label_fields:
+            #             results[label] = np.array(
+            #                 [results[label][i] for i in results['idx_mapper']])
+            #         if 'masks' in results:
+            #             results['masks'] = np.array(
+            #                 [results['masks'][i] for i in results['idx_mapper']])
+            #             results['masks'] = ori_masks.__class__(
+            #                 results['masks'], results['image'].shape[0],
+            #                 results['image'].shape[1])
 
-@PIPELINES.register_module()
-class RandomMosaic(object):
-    """Mosaic augmentation. Given 4 images, mosaic transform combines them into
-    one output image. The output image is composed of the parts from each sub-
-    image.
+            #         if (not len(results['idx_mapper'])
+            #                 and self.skip_img_without_anno):
+            #             return None
 
-    .. code:: text
+            # if 'gt_labels' in results:
+            #     if isinstance(results['gt_labels'], list):
+            #         results['gt_labels'] = np.array(results['gt_labels'])
+            #     results['gt_labels'] = results['gt_labels'].astype(np.int64)
 
-                        mosaic transform
-                           center_x
-                +------------------------------+
-                |       pad        |  pad      |
-                |      +-----------+           |
-                |      |           |           |
-                |      |  image1   |--------+  |
-                |      |           |        |  |
-                |      |           | image2 |  |
-     center_y   |----+-------------+-----------|
-                |    |   cropped   |           |
-                |pad |   image3    |  image4   |
-                |    |             |           |
-                +----|-------------+-----------+
-                     |             |
-                     +-------------+
+            # back to the original format
+            # results = self.mapper(results, self.keymap_back)
 
-     The mosaic transform steps are as follows:
-         1. Choose the mosaic center as the intersections of 4 images
-         2. Get the left top image according to the index, and randomly
-            sample another 3 images from the custom dataset.
-         3. Sub image will be cropped if image is larger than mosaic patch
-
-    Args:
-        prob (float): mosaic probability.
-        img_scale (Sequence[int]): Image size after mosaic pipeline of
-            a single image. The size of the output image is four times
-            that of a single image. The output image comprises 4 single images.
-            Default: (640, 640).
-        center_ratio_range (Sequence[float]): Center ratio range of mosaic
-            output. Default: (0.5, 1.5).
-        pad_val (int): Pad value. Default: 0.
-        seg_pad_val (int): Pad value of segmentation map. Default: 255.
-    """
-
-    def __init__(self,
-                 prob,
-                 img_scale=(640, 640),
-                 center_ratio_range=(0.5, 1.5),
-                 pad_val=0,
-                 seg_pad_val=255):
-        assert 0 <= prob and prob <= 1
-        assert isinstance(img_scale, tuple)
-        self.prob = prob
-        self.img_scale = img_scale
-        self.center_ratio_range = center_ratio_range
-        self.pad_val = pad_val
-        self.seg_pad_val = seg_pad_val
-
-    def __call__(self, results):
-        """Call function to make a mosaic of image.
-
-        Args:
-            results (dict): Result dict.
-
-        Returns:
-            dict: Result dict with mosaic transformed.
-        """
-        mosaic = True if np.random.rand() < self.prob else False
-        if mosaic:
-            results = self._mosaic_transform_img(results)
-            results = self._mosaic_transform_seg(results)
-        return results
-
-    def get_indexes(self, dataset):
-        """Call function to collect indexes.
-
-        Args:
-            dataset (:obj:`MultiImageMixDataset`): The dataset.
-
-        Returns:
-            list: indexes.
-        """
-
-        indexes = [random.randint(0, len(dataset)) for _ in range(3)]
-        return indexes
-
-    def _mosaic_transform_img(self, results):
-        """Mosaic transform function.
-
-        Args:
-            results (dict): Result dict.
-
-        Returns:
-            dict: Updated result dict.
-        """
-
-        assert 'mix_results' in results
-        if len(results['img'].shape) == 3:
-            mosaic_img = np.full(
-                (int(self.img_scale[0] * 2), int(self.img_scale[1] * 2), 3),
-                self.pad_val,
-                dtype=results['img'].dtype)
-        else:
-            mosaic_img = np.full(
-                (int(self.img_scale[0] * 2), int(self.img_scale[1] * 2)),
-                self.pad_val,
-                dtype=results['img'].dtype)
-
-        # mosaic center x, y
-        self.center_x = int(
-            random.uniform(*self.center_ratio_range) * self.img_scale[1])
-        self.center_y = int(
-            random.uniform(*self.center_ratio_range) * self.img_scale[0])
-        center_position = (self.center_x, self.center_y)
-
-        loc_strs = ('top_left', 'top_right', 'bottom_left', 'bottom_right')
-        for i, loc in enumerate(loc_strs):
-            if loc == 'top_left':
-                result_patch = copy.deepcopy(results)
-            else:
-                result_patch = copy.deepcopy(results['mix_results'][i - 1])
-
-            img_i = result_patch['img']
-            h_i, w_i = img_i.shape[:2]
-            # keep_ratio resize
-            scale_ratio_i = min(self.img_scale[0] / h_i,
-                                self.img_scale[1] / w_i)
-            img_i = mmcv.imresize(
-                img_i, (int(w_i * scale_ratio_i), int(h_i * scale_ratio_i)))
-
-            # compute the combine parameters
-            paste_coord, crop_coord = self._mosaic_combine(
-                loc, center_position, img_i.shape[:2][::-1])
-            x1_p, y1_p, x2_p, y2_p = paste_coord
-            x1_c, y1_c, x2_c, y2_c = crop_coord
-
-            # crop and paste image
-            mosaic_img[y1_p:y2_p, x1_p:x2_p] = img_i[y1_c:y2_c, x1_c:x2_c]
-
-        results['img'] = mosaic_img
-        results['img_shape'] = mosaic_img.shape
-        results['ori_shape'] = mosaic_img.shape
-
-        return results
-
-    def _mosaic_transform_seg(self, results):
-        """Mosaic transform function for label annotations.
-
-        Args:
-            results (dict): Result dict.
-
-        Returns:
-            dict: Updated result dict.
-        """
-
-        assert 'mix_results' in results
-        for key in results.get('seg_fields', []):
-            mosaic_seg = np.full(
-                (int(self.img_scale[0] * 2), int(self.img_scale[1] * 2)),
-                self.seg_pad_val,
-                dtype=results[key].dtype)
-
-            # mosaic center x, y
-            center_position = (self.center_x, self.center_y)
-
-            loc_strs = ('top_left', 'top_right', 'bottom_left', 'bottom_right')
-            for i, loc in enumerate(loc_strs):
-                if loc == 'top_left':
-                    result_patch = copy.deepcopy(results)
-                else:
-                    result_patch = copy.deepcopy(results['mix_results'][i - 1])
-
-                gt_seg_i = result_patch[key]
-                h_i, w_i = gt_seg_i.shape[:2]
-                # keep_ratio resize
-                scale_ratio_i = min(self.img_scale[0] / h_i,
-                                    self.img_scale[1] / w_i)
-                gt_seg_i = mmcv.imresize(
-                    gt_seg_i,
-                    (int(w_i * scale_ratio_i), int(h_i * scale_ratio_i)),
-                    interpolation='nearest')
-
-                # compute the combine parameters
-                paste_coord, crop_coord = self._mosaic_combine(
-                    loc, center_position, gt_seg_i.shape[:2][::-1])
-                x1_p, y1_p, x2_p, y2_p = paste_coord
-                x1_c, y1_c, x2_c, y2_c = crop_coord
-
-                # crop and paste image
-                mosaic_seg[y1_p:y2_p, x1_p:x2_p] = gt_seg_i[y1_c:y2_c,
-                                                            x1_c:x2_c]
-
-            results[key] = mosaic_seg
-
-        return results
-
-    def _mosaic_combine(self, loc, center_position_xy, img_shape_wh):
-        """Calculate global coordinate of mosaic image and local coordinate of
-        cropped sub-image.
-
-        Args:
-            loc (str): Index for the sub-image, loc in ('top_left',
-              'top_right', 'bottom_left', 'bottom_right').
-            center_position_xy (Sequence[float]): Mixing center for 4 images,
-                (x, y).
-            img_shape_wh (Sequence[int]): Width and height of sub-image
-
-        Returns:
-            tuple[tuple[float]]: Corresponding coordinate of pasting and
-                cropping
-                - paste_coord (tuple): paste corner coordinate in mosaic image.
-                - crop_coord (tuple): crop corner coordinate in mosaic image.
-        """
-
-        assert loc in ('top_left', 'top_right', 'bottom_left', 'bottom_right')
-        if loc == 'top_left':
-            # index0 to top left part of image
-            x1, y1, x2, y2 = max(center_position_xy[0] - img_shape_wh[0], 0), \
-                             max(center_position_xy[1] - img_shape_wh[1], 0), \
-                             center_position_xy[0], \
-                             center_position_xy[1]
-            crop_coord = img_shape_wh[0] - (x2 - x1), img_shape_wh[1] - (
-                y2 - y1), img_shape_wh[0], img_shape_wh[1]
-
-        elif loc == 'top_right':
-            # index1 to top right part of image
-            x1, y1, x2, y2 = center_position_xy[0], \
-                             max(center_position_xy[1] - img_shape_wh[1], 0), \
-                             min(center_position_xy[0] + img_shape_wh[0],
-                                 self.img_scale[1] * 2), \
-                             center_position_xy[1]
-            crop_coord = 0, img_shape_wh[1] - (y2 - y1), min(
-                img_shape_wh[0], x2 - x1), img_shape_wh[1]
-
-        elif loc == 'bottom_left':
-            # index2 to bottom left part of image
-            x1, y1, x2, y2 = max(center_position_xy[0] - img_shape_wh[0], 0), \
-                             center_position_xy[1], \
-                             center_position_xy[0], \
-                             min(self.img_scale[0] * 2, center_position_xy[1] +
-                                 img_shape_wh[1])
-            crop_coord = img_shape_wh[0] - (x2 - x1), 0, img_shape_wh[0], min(
-                y2 - y1, img_shape_wh[1])
-
-        else:
-            # index3 to bottom right part of image
-            x1, y1, x2, y2 = center_position_xy[0], \
-                             center_position_xy[1], \
-                             min(center_position_xy[0] + img_shape_wh[0],
-                                 self.img_scale[1] * 2), \
-                             min(self.img_scale[0] * 2, center_position_xy[1] +
-                                 img_shape_wh[1])
-            crop_coord = 0, 0, min(img_shape_wh[0],
-                                   x2 - x1), min(y2 - y1, img_shape_wh[1])
-
-        paste_coord = x1, y1, x2, y2
-        return paste_coord, crop_coord
+            # # update final shape
+            # if self.update_pad_shape:
+            #     results['pad_shape'] = results['img'].shape
+            return results
+        except:
+            traceback.print_exc()
+            return res
 
     def __repr__(self):
-        repr_str = self.__class__.__name__
-        repr_str += f'(prob={self.prob}, '
-        repr_str += f'img_scale={self.img_scale}, '
-        repr_str += f'center_ratio_range={self.center_ratio_range}, '
-        repr_str += f'pad_val={self.pad_val}, '
-        repr_str += f'seg_pad_val={self.pad_val})'
+        repr_str = self.__class__.__name__ + f'(transforms={self.transforms})'
         return repr_str
+
