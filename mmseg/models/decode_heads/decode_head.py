@@ -90,6 +90,8 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         self.norm_cfg = norm_cfg
         self.act_cfg = act_cfg
         self.in_index = in_index
+        
+        
 
         self.ignore_index = ignore_index
         self.align_corners = align_corners
@@ -265,6 +267,7 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         if self.dropout is not None:
             feat = self.dropout(feat)
         output = self.conv_seg(feat)
+        # output = self.final_act(output)
         return output
 
     @force_fp32(apply_to=('seg_logit', ))

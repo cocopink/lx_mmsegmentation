@@ -87,5 +87,6 @@ class FCNHead(BaseDecodeHead):
         output = self.cls_seg(output)
         # print(output.shape)
         # print(output[0,0,0,:10])
-        # #exit(0)
+        # exit(0)
+        #output = nn.functional.sigmoid(output)
         return output

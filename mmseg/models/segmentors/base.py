@@ -248,34 +248,40 @@ class BaseSegmentor(BaseModule, metaclass=ABCMeta):
         img = mmcv.imread(img)
         img = img.copy()
         seg = result[0]
-        if palette is None:
-            if self.PALETTE is None:
-                # Get random state before set seed,
-                # and restore random state later.
-                # It will prevent loss of randomness, as the palette
-                # may be different in each iteration if not specified.
-                # See: https://github.com/open-mmlab/mmdetection/issues/5844
-                state = np.random.get_state()
-                np.random.seed(42)
-                # random palette
-                palette = np.random.randint(
-                    0, 255, size=(len(self.CLASSES), 3))
-                np.random.set_state(state)
-            else:
-                palette = self.PALETTE
-        palette = np.array(palette)
-        assert palette.shape[0] == len(self.CLASSES)
-        assert palette.shape[1] == 3
-        assert len(palette.shape) == 2
-        assert 0 < opacity <= 1.0
-        color_seg = np.zeros((seg.shape[0], seg.shape[1], 3), dtype=np.uint8)
-        for label, color in enumerate(palette):
-            color_seg[seg == label, :] = color
-        # convert to BGR
-        color_seg = color_seg[..., ::-1]
+        seg = seg[1]
+        seg = (seg * 255)
 
-        img = img * (1 - opacity) + color_seg * opacity
-        img = img.astype(np.uint8)
+        # seg = torch.tensor(seg)
+        # print(torch.unique(seg,return_counts=True))
+        # exit(0)
+        # if palette is None:
+        #     if self.PALETTE is None:
+        #         # Get random state before set seed,
+        #         # and restore random state later.
+        #         # It will prevent loss of randomness, as the palette
+        #         # may be different in each iteration if not specified.
+        #         # See: https://github.com/open-mmlab/mmdetection/issues/5844
+        #         state = np.random.get_state()
+        #         np.random.seed(42)
+        #         # random palette
+        #         palette = np.random.randint(
+        #             0, 255, size=(len(self.CLASSES), 3))
+        #         np.random.set_state(state)
+        #     else:
+        #         palette = self.PALETTE
+        # palette = np.array(palette)
+        # assert palette.shape[0] == len(self.CLASSES)
+        # assert palette.shape[1] == 3
+        # assert len(palette.shape) == 2
+        # assert 0 < opacity <= 1.0
+        # color_seg = np.zeros((seg.shape[0], seg.shape[1], 3), dtype=np.uint8)
+        # for label, color in enumerate(palette):
+        #     color_seg[seg == label, :] = color
+        # # convert to BGR
+        # color_seg = color_seg[..., ::-1]
+
+        # img = img * (1 - opacity) + color_seg * opacity
+        # img = img.astype(np.uint8)
         # if out_file specified, do not show image in window
         if out_file is not None:
             show = False
@@ -283,7 +289,16 @@ class BaseSegmentor(BaseModule, metaclass=ABCMeta):
         if show:
             mmcv.imshow(img, win_name, wait_time)
         if out_file is not None:
-            mmcv.imwrite(img, out_file)
+            out_file = out_file.replace("jpg","png")
+            seg = seg.astype(np.uint8)
+            # seg = np.array(seg).astype(np.uint8)
+            # print(seg[1])
+            # exit(0)
+            #seg[seg>0]=seg * 255
+            # seg = (seg - seg.min()) / (seg.max() - seg.min()) * 255  # 线性归一化
+            # seg = seg.astype(np.uint8)  # 转换为 uint8 类型
+            mmcv.imwrite(seg,out_file)
+            #mmcv.imwrite(img, out_file)
 
         if not (show or out_file):
             warnings.warn('show==False and out_file is not specified, only '

@@ -1,4 +1,4 @@
-CONFIG='/home/lmf/mmsegmentation/work_configs/tamper/convx_l_512_renew.py'
+CONFIG='/home/lmf/mmsegmentation/work_configs/tamper/tamper_eff_b7.py'
 GPUS=4
 NNODES=${NNODES:-1}
 NODE_RANK=${NODE_RANK:-0}

@@ -51,7 +51,6 @@ def intersect_and_union(pred_label,
          torch.Tensor: The prediction histogram on all classes.
          torch.Tensor: The ground truth histogram on all classes.
     """
-
     if isinstance(pred_label, str):
         pred_label = torch.from_numpy(np.load(pred_label))
     else:
@@ -73,6 +72,7 @@ def intersect_and_union(pred_label,
             label[label_copy == old_id] = new_id
 
     mask = (label != ignore_index)
+    #print(f"-----------{mask.shape}-------{label.shape}")
     pred_label = pred_label[mask]
     label = label[mask]
 

@@ -198,7 +198,8 @@ class LoadAnnotations(object):
         self.file_client_args = file_client_args.copy()
         self.file_client = None
         self.imdecode_backend = imdecode_backend
-        self.binarize = binarize
+        #self.binarize = binarize
+        self.binarize = True
 
     def __call__(self, results):
         """Call function to load multiple types annotations.
@@ -228,7 +229,8 @@ class LoadAnnotations(object):
             for old_id, new_id in results['label_map'].items():
                 gt_semantic_seg[gt_semantic_seg == old_id] = new_id
         if self.binarize:
-            gt_semantic_seg = (gt_semantic_seg != 0).astype(np.uint8)
+            #二值化
+            gt_semantic_seg = (gt_semantic_seg >= 127).astype(np.uint8)
         # reduce zero_label
         if self.reduce_zero_label:
             # avoid using underflow conversion

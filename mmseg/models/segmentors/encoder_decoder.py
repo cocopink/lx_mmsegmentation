@@ -78,6 +78,8 @@ class EncoderDecoder(BaseSegmentor):
             size=img.shape[2:],
             mode='bilinear',
             align_corners=self.align_corners)
+        # print(out.shape)
+        # exit(0)
         return out
 
     def _decode_head_forward_train(self, x, img_metas, gt_semantic_seg):
@@ -95,6 +97,10 @@ class EncoderDecoder(BaseSegmentor):
         """Run forward function and calculate loss for decode head in
         inference."""
         seg_logits = self.decode_head.forward_test(x, img_metas, self.test_cfg)
+        # print(seg_logits.shape)
+        # print(seg_logits[0,0,0,:10])
+        # print(seg_logits[0,1,0,:10])
+        # exit(0)
         return seg_logits
 
     def _auxiliary_head_forward_train(self, x, img_metas, gt_semantic_seg):
@@ -183,7 +189,7 @@ class EncoderDecoder(BaseSegmentor):
                                 int(preds.shape[2] - y2)))
 
                 count_mat[:, :, y1:y2, x1:x2] += 1
-        assert (count_mat == 0).sum() == 0
+        # assert (count_mat == 0).sum() == 0
         if torch.onnx.is_in_onnx_export():
             # cast count_mat to constant while exporting to ONNX
             count_mat = torch.from_numpy(
@@ -246,6 +252,8 @@ class EncoderDecoder(BaseSegmentor):
             seg_logit = self.slide_inference(img, img_meta, rescale)
         else:
             seg_logit = self.whole_inference(img, img_meta, rescale)
+        # print(self.out_channels)  2
+        # exit(0)
         if self.out_channels == 1:
             output = F.sigmoid(seg_logit)
         else:
@@ -258,12 +266,15 @@ class EncoderDecoder(BaseSegmentor):
                 output = output.flip(dims=(3, ))
             elif flip_direction == 'vertical':
                 output = output.flip(dims=(2, ))
-
+        # print(output) [1, 2, H, W] 的张量，其中第二个维度为 2，表示有两个类别。每个像素点都有两个数值，分别表示该像素属于两个类别的概率。
+        # exit(0)
         return output
 
     def simple_test(self, img, img_meta, rescale=True):
         """Simple test with single image."""
         seg_logit = self.inference(img, img_meta, rescale)
+        # print(seg_logit.shape)
+        # exit(0)
         if self.out_channels == 1:
             seg_pred = (seg_logit >
                         self.decode_head.threshold).to(seg_logit).squeeze(1)
@@ -284,6 +295,8 @@ class EncoderDecoder(BaseSegmentor):
         Return numpy seg_map logits.
         """
         seg_logit = self.inference(img[0], img_metas[0], rescale)
+        # print(seg_logit) //模型推理测试集没走这里
+        # exit(0)
         seg_logit = seg_logit.cpu().numpy()
         return seg_logit
 
@@ -296,10 +309,22 @@ class EncoderDecoder(BaseSegmentor):
         assert rescale
         # to save memory, we get augmented seg logit inplace
         seg_logit = self.inference(imgs[0], img_metas[0], rescale)
+        # print(seg_logit)   测试集也有数据增强，然后在这里输出了概率图
+        # exit(0)
+        # print(len(imgs)) 2
+        # exit(0)
         for i in range(1, len(imgs)):
             cur_seg_logit = self.inference(imgs[i], img_metas[i], rescale)
             seg_logit += cur_seg_logit
+
+
         seg_logit /= len(imgs)
+        # seg_logit = seg_logit.cpu().numpy()
+        # seg_logit = list(seg_logit)
+
+
+        # print(seg_logit.shape)
+        # exit(0)
         if self.out_channels == 1:
             seg_pred = (seg_logit >
                         self.decode_head.threshold).to(seg_logit).squeeze(1)
@@ -308,7 +333,10 @@ class EncoderDecoder(BaseSegmentor):
         seg_pred = seg_pred.cpu().numpy()
         # unravel batch dim
         seg_pred = list(seg_pred)
+        # return seg_logit
         return seg_pred
+
+    
 
     def aug_test_logits(self, img, img_metas, rescale=True):
         """Test with augmentations.
@@ -327,3 +355,4 @@ class EncoderDecoder(BaseSegmentor):
         seg_logit /= len(imgs)
         seg_logit = seg_logit.cpu().numpy()
         return seg_logit
+    

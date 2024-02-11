@@ -138,6 +138,7 @@ class UPerHead(BaseDecodeHead):
         output = self._forward_feature(inputs)
         output = self.cls_seg(output)
         # print(output.shape)
-        # print(output[0,0,0,:10])
-        # #exit(0)
+        # print(output[0,1,0,:10])
+        # exit(0)
+        #output = nn.functional.sigmoid(output)
         return output

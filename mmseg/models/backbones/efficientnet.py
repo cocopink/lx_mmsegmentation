@@ -11,9 +11,9 @@ from mmcv.runner import BaseModule, Sequential
 from timm.models.layers import trunc_normal_
 
 # from mmcls.models.backbones.base_backbone import BaseBackbone
-from mmseg.utils import get_root_logger
-from mmcv.runner import BaseModule, ModuleList, _load_checkpoint
-from ..utils import efficientnet_inverted_residual, se_layer, make_divisible
+from mmseg.utils import get_root_logger, checkpoint
+from mmcv.runner import load_checkpoint
+from ..utils import EffInvertedResidual, SELayer, make_divisible
 from ..builder import BACKBONES
 
 
@@ -79,7 +79,7 @@ class EdgeResidual(BaseModule):
             act_cfg=act_cfg)
 
         if self.with_se:
-            self.se = se_layer(**se_cfg)
+            self.se = SELayer(**se_cfg)
 
         self.conv2 = ConvModule(
             in_channels=mid_channels,
@@ -372,7 +372,7 @@ class EfficientNet(nn.Module):
                             act_cfg=(self.act_cfg, dict(type='Sigmoid')))
                     block = partial(EdgeResidual, with_residual=with_residual)
                 else:
-                    block = efficientnet_inverted_residual
+                    block = EffInvertedResidual
                 layer.append(
                     block(
                         in_channels=self.in_channels,
@@ -417,7 +417,7 @@ class EfficientNet(nn.Module):
         if isinstance(pretrained, str):
             self.apply(_init_weights)
             logger = get_root_logger()
-            _load_checkpoint(self, pretrained, strict=False, logger=logger)
+            load_checkpoint(self, pretrained, strict=False, logger=logger)
         elif pretrained is None:
             self.apply(_init_weights)
         else:

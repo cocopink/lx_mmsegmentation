@@ -89,6 +89,14 @@ def single_gpu_test(model,
     for batch_indices, data in zip(loader_indices, data_loader):
         with torch.no_grad():
             result = model(return_loss=False, **data)
+            # print(result.shape) encoder_decoder中的augtest直接返回了两个维度的概率
+            # print(result[0,0,0,:10])
+            # print(result[0,1,0,:10])
+            # exit(0)
+            # seg = result[0]
+            # seg = torch.tensor(seg)
+            # print(torch.unique(seg,return_counts=True))
+            # exit(0)
             # print(len(result))
             # print(result[0].shape)
             #print(result.size)

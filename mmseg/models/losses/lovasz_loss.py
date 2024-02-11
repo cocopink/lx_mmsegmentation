@@ -14,7 +14,6 @@ from .utils import get_class_weight, weight_reduce_loss
 
 def lovasz_grad(gt_sorted):
     """Computes gradient of the Lovasz extension w.r.t sorted errors.
-
     See Alg. 1 in paper.
     """
     p = len(gt_sorted)
@@ -59,12 +58,10 @@ def flatten_probs(probs, labels, ignore_index=None):
 
 def lovasz_hinge_flat(logits, labels):
     """Binary Lovasz hinge loss.
-
     Args:
         logits (torch.Tensor): [P], logits at each prediction
             (between -infty and +infty).
         labels (torch.Tensor): [P], binary ground truth labels (0 or 1).
-
     Returns:
         torch.Tensor: The calculated loss.
     """
@@ -90,7 +87,6 @@ def lovasz_hinge(logits,
                  avg_factor=None,
                  ignore_index=255):
     """Binary Lovasz hinge loss.
-
     Args:
         logits (torch.Tensor): [B, H, W], logits at each pixel
             (between -infty and +infty).
@@ -108,7 +104,6 @@ def lovasz_hinge(logits,
             the loss. This parameter only works when per_image is True.
             Default: None.
         ignore_index (int | None): The label index to be ignored. Default: 255.
-
     Returns:
         torch.Tensor: The calculated loss.
     """
@@ -128,7 +123,6 @@ def lovasz_hinge(logits,
 
 def lovasz_softmax_flat(probs, labels, classes='present', class_weight=None):
     """Multi-class Lovasz-Softmax loss.
-
     Args:
         probs (torch.Tensor): [P, C], class probabilities at each prediction
             (between 0 and 1).
@@ -138,7 +132,6 @@ def lovasz_softmax_flat(probs, labels, classes='present', class_weight=None):
             a list of classes to average. Default: 'present'.
         class_weight (list[float], optional): The weight for each class.
             Default: None.
-
     Returns:
         torch.Tensor: The calculated loss.
     """
@@ -178,7 +171,6 @@ def lovasz_softmax(probs,
                    avg_factor=None,
                    ignore_index=255):
     """Multi-class Lovasz-Softmax loss.
-
     Args:
         probs (torch.Tensor): [B, C, H, W], class probabilities at each
             prediction (between 0 and 1).
@@ -198,7 +190,6 @@ def lovasz_softmax(probs,
             the loss. This parameter only works when per_image is True.
             Default: None.
         ignore_index (int | None): The label index to be ignored. Default: 255.
-
     Returns:
         torch.Tensor: The calculated loss.
     """
@@ -225,11 +216,9 @@ def lovasz_softmax(probs,
 @LOSSES.register_module()
 class LovaszLoss(nn.Module):
     """LovaszLoss.
-
     This loss is proposed in `The Lovasz-Softmax loss: A tractable surrogate
     for the optimization of the intersection-over-union measure in neural
     networks <https://arxiv.org/abs/1705.08790>`_.
-
     Args:
         loss_type (str, optional): Binary or multi-class loss.
             Default: 'multi_class'. Options are "binary" and "multi_class".
@@ -311,7 +300,6 @@ class LovaszLoss(nn.Module):
     @property
     def loss_name(self):
         """Loss Name.
-
         This function must be implemented and will return the name of this
         loss function. This name will be used to combine different loss items
         by simple sum operation. In addition, if you want this loss item to be
