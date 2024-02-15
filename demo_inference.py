@@ -29,7 +29,7 @@ if not os.path.exists(output_folder):
 # 获取输入文件夹下的所有图片
 image_files = glob.glob(os.path.join(input_folder, '*'))
 
-image = Image.open('/home/lmf/0628.jpg')#image_file
+image = Image.open('/home/lmf/mmsegmentation/0000.jpg')#image_file
 result = process_image(model, image)
 
 # 假设result是你的分割结果
@@ -48,7 +48,7 @@ seg_img = Image.fromarray(seg_map.astype(np.uint8))
 # output_file = os.path.join(output_folder, basename)
 
 # 保存图像
-seg_img.save('/home/lmf/0628.png')#output_file
+seg_img.save('/home/lmf/mmsegmentation/0000_changed.png')#output_file
 
 # 对每一张图片进行处理
 # for image_file in image_files:
